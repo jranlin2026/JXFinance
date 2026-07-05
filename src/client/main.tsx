@@ -60,6 +60,7 @@ function App() {
   const [productCostFiles, setProductCostFiles] = useState<File[]>([]);
   const [flowFiles, setFlowFiles] = useState<File[]>([]);
   const [freightFiles, setFreightFiles] = useState<File[]>([]);
+  const [shippingFee, setShippingFee] = useState("2.4");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<GenerateResponse | null>(null);
@@ -76,12 +77,18 @@ function App() {
   async function generate() {
     setError("");
     setResult(null);
+    const parsedShippingFee = Number(shippingFee);
+    if (!Number.isFinite(parsedShippingFee) || parsedShippingFee < 0) {
+      setError("单个包裹快递成本必须是大于或等于 0 的数字。");
+      return;
+    }
     setIsGenerating(true);
     const formData = new FormData();
     if (orderFiles[0]) formData.append("orderFile", orderFiles[0]);
     if (productCostFiles[0]) formData.append("productCostFile", productCostFiles[0]);
     flowFiles.forEach((file) => formData.append("flowFiles", file));
     freightFiles.forEach((file) => formData.append("freightFiles", file));
+    formData.append("shippingFee", String(parsedShippingFee));
 
     try {
       const response = await fetch("/api/settlements", { method: "POST", body: formData });
@@ -123,12 +130,26 @@ function App() {
           <div className="section-heading">
             <div>
               <h1>生成结算输出表</h1>
-              <p>无需选择店铺。默认快递成本按每个包裹 2.4 元计算，输出包含订单、达人结算和资金流水核对 6 个 sheet。</p>
+              <p>无需选择店铺。快递成本按下方参数计算，输出包含订单、达人结算和资金流水核对 6 个 sheet。</p>
             </div>
             <span className="local-pill">
               <CheckCircle2 size={16} />
               本地文件存储
             </span>
+          </div>
+
+          <div className="parameter-panel">
+            <label className="parameter-field">
+              <span>单个包裹快递成本</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={shippingFee}
+                onChange={(event) => setShippingFee(event.target.value)}
+              />
+            </label>
+            <span className="parameter-note">用于计算达人结算汇总表里的快递费用，默认 2.4 元/包裹。</span>
           </div>
 
           <div className="upload-list no-top-gap">
