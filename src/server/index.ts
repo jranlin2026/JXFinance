@@ -8,8 +8,9 @@ import { createServer as createViteServer } from "vite";
 import { getConfig, saveMappings, saveStores } from "./configStore";
 import { buildSettlement } from "./settlementEngine";
 import { findSettlementRecord, listSettlementRecords, nextSettlementArchive, saveSettlementArchive } from "./archiveStore";
-import { ensureDir } from "./utils";
+import { ensureDir, safePathSegment } from "./utils";
 import { extractWorkbookRows } from "./workbookExtractor";
+import { inferStoreNameFromFileName, repairMojibake } from "./textEncoding";
 import { StoreConfig } from "../shared/types";
 
 const app = express();
@@ -40,18 +41,6 @@ const ORDER_FIELDS = [
 const FLOW_REQUIRED_FIELDS = ["动账时间", "动账方向", "动账金额", "动账场景", "子订单号", "订单号", "备注"];
 const PRODUCT_COST_FIELDS = ["商家编码", "产品成本"];
 const FREIGHT_FIELDS = ["订单编号", "支付保费", "保费状态", "动账时间", "下单时间", "承保时间"];
-
-function inferStoreName(fileName = "") {
-  const rawBaseName = path.basename(fileName, path.extname(fileName)).trim();
-  const baseName = /[ÃÂ]|[\u0080-\u009f]|[èéåçäæ]/u.test(rawBaseName)
-    ? Buffer.from(rawBaseName, "latin1").toString("utf8")
-    : rawBaseName;
-  return baseName
-    .replace(/[-_ ]?订单.*$/u, "")
-    .replace(/[-_ ]?资金流水.*$/u, "")
-    .replace(/[-_ ]?运费险.*$/u, "")
-    .trim() || "临时店铺";
-}
 
 function missingMessage(label: string, fields: string[]) {
   return `${label}缺少必要字段：${fields.join("、")}。请确认上传的是正确表格。`;
@@ -120,20 +109,20 @@ app.post(
       const flowExtracts = await Promise.all(flowFiles.map((file) => extractWorkbookRows(file.path)));
       flowExtracts.forEach((extract, index) => {
         const missingFlowFields = FLOW_REQUIRED_FIELDS.filter((field) => extract.missing.includes(field));
-        if (missingFlowFields.length) throw new Error(missingMessage(`资金流水明细表「${flowFiles[index].originalname}」`, missingFlowFields));
+        if (missingFlowFields.length) throw new Error(missingMessage(`资金流水明细表「${repairMojibake(flowFiles[index].originalname)}」`, missingFlowFields));
       });
       const productCostExtract = productCostFile ? await extractWorkbookRows(productCostFile.path, PRODUCT_COST_FIELDS) : { rows: [], missing: [] };
       if (productCostExtract.missing.length) throw new Error(missingMessage("商品成本明细表", productCostExtract.missing));
       const freightExtracts = await Promise.all(freightFiles.map((file) => extractWorkbookRows(file.path, FREIGHT_FIELDS)));
       freightExtracts.forEach((extract, index) => {
         const missingFreightFields = ["订单编号", "支付保费", "保费状态"].filter((field) => extract.missing.includes(field));
-        if (missingFreightFields.length) throw new Error(missingMessage(`运费险明细表「${freightFiles[index].originalname}」`, missingFreightFields));
+        if (missingFreightFields.length) throw new Error(missingMessage(`运费险明细表「${repairMojibake(freightFiles[index].originalname)}」`, missingFreightFields));
       });
 
       const generatedAt = new Date();
       const store: StoreConfig = {
         id: "mvp-store",
-        name: inferStoreName(orderFile.originalname),
+        name: inferStoreNameFromFileName(orderFile.originalname),
         owner: "财务",
         defaultShippingFee: 2.4,
         updatedAt: generatedAt.toISOString()
@@ -146,7 +135,7 @@ app.post(
         productCostRows: productCostExtract.rows,
         flowRows: flowExtracts.flatMap((extract) => extract.rows),
         freightRows: freightExtracts.flatMap((extract) => extract.rows),
-        uploadedFileNames: uploadedFiles.map((file) => file.originalname),
+        uploadedFileNames: uploadedFiles.map((file) => repairMojibake(file.originalname)),
         generatedAt
       };
 
@@ -188,7 +177,8 @@ app.get("/api/settlements/:id/download", async (req, res, next) => {
     const files = await fs.readdir(resultDir);
     const excel = files.find((file) => file.endsWith(".xlsx"));
     if (!excel) throw new Error("未找到结算 Excel 文件。");
-    res.download(path.join(resultDir, excel));
+    const downloadName = `${safePathSegment(record.storeName)}_${record.month}_v${record.version}_结算输出表.xlsx`;
+    res.download(path.join(resultDir, excel), downloadName);
   } catch (error) {
     next(error);
   }

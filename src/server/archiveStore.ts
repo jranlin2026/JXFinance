@@ -3,6 +3,7 @@ import path from "node:path";
 import * as XLSX from "xlsx";
 import { SettlementRecord, StoreConfig } from "../shared/types";
 import { SettlementBuildResult, SettlementInput, snapshotConfig } from "./settlementEngine";
+import { normalizeStoreName, repairMojibake } from "./textEncoding";
 import { ensureDir, safePathSegment, timestampForPath, writeJson } from "./utils";
 
 const settlementsRoot = path.resolve("data/settlements");
@@ -71,6 +72,14 @@ export async function saveSettlementArchive(params: {
   return { record, resultPath };
 }
 
+function normalizeRecordForDisplay(record: SettlementRecord): SettlementRecord {
+  return {
+    ...record,
+    storeName: normalizeStoreName(record.storeName),
+    month: repairMojibake(record.month)
+  };
+}
+
 async function walkSettlementRecords(dir: string): Promise<SettlementRecord[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
   const records: SettlementRecord[] = [];
@@ -88,7 +97,7 @@ async function walkSettlementRecords(dir: string): Promise<SettlementRecord[]> {
 
 export async function listSettlementRecords() {
   const records = await walkSettlementRecords(settlementsRoot);
-  return records.sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+  return records.map(normalizeRecordForDisplay).sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
 }
 
 export async function findSettlementRecord(id: string) {
